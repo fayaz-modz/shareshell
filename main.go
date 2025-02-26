@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"sharec/answer"
+	"sharec/offer"
+
 )
 
 const usage = `sharec
@@ -20,7 +23,11 @@ func parse(command string) {
     return;
   }
   if (command == "offer") {
-    fmt.Println("offer");
+    offer.NewConn(func(m *offer.DataChennel){
+      
+    }, func(msg offer.DataChannelMessage){
+      fmt.Println("got message: ", string(msg.Data))
+    })
     return;
   }
   if (command == "connect") {
@@ -28,7 +35,8 @@ func parse(command string) {
       fmt.Println("you need to provide an offer id. sharec connect <id>");
       return;
     }
-    fmt.Println("connect");
+    fmt.Println("connecting to otp: ", os.Args[2]);
+    answer.AnswerConnection(os.Args[2]);
     return;
   } 
   if (command == "help"){

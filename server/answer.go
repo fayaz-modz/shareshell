@@ -64,7 +64,14 @@ func handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sendErr := ws.WriteJSON(Message{Auth: newJwt}); sendErr != nil {
+	cMsg.(*Message).Mutex.Lock()
+	offersdp := cMsg.(*Message).OfferSDP
+	cMsg.(*Message).Mutex.Unlock()
+
+	if sendErr := ws.WriteJSON(Message{
+    Auth: newJwt,
+    OfferSDP: offersdp,
+  }); sendErr != nil {
 		ws.Close()
 		cMsg.(*Message).Mutex.Lock()
 		cMsg.(*Message).client = false
@@ -160,6 +167,7 @@ func handleAnswerPing(ws *websocket.Conn, msg *Message, wg *sync.Mutex) {
 	for {
 		pingAnswer := <-msg.pingAnswer
 		if pingAnswer == SDP {
+      fmt.Println("answer is pinged")
 			wg.Lock()
 			tErr := ws.WriteJSON(&Message{
 				OfferSDP:        msg.OfferSDP,

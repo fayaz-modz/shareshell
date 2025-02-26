@@ -10,6 +10,7 @@ import (
 )
 
 func handleOffer(w http.ResponseWriter, r *http.Request) {
+  fmt.Println("new offer connection")
 
 	url := r.URL
 	headers := r.Header
@@ -31,7 +32,7 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 				ws.Close()
 				return
 			}
-			otp = fmt.Sprintf("%d", rand.Intn(1000000))
+			otp = fmt.Sprintf("%d", rand.Intn(100))
 			messagesMu.Lock() // !! Lock
 			findOtp := getMessage(otp)
 			if findOtp == nil {
@@ -76,8 +77,8 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+  fmt.Println("offer connection validated")
 	errMsg := ws.WriteJSON(Message{Auth: auth})
-  ws.WriteJSON(struct {Otp string}{Otp: otp})
 
 	if errMsg != nil {
 		ws.Close()
@@ -138,34 +139,37 @@ func handleOfferConnection(ws *websocket.Conn, msg *Message, wg *sync.Mutex) {
 		}
 
 		if msgN.OfferSDP != "" {
+      fmt.Println("offer sdp recieved")
 			messagesMu.Lock()
 			msg.OfferSDP = msgN.OfferSDP
 			messagesMu.Unlock()
 			msg.pingAnswer <- SDP
 		} else if msgN.OfferCandidates != nil {
+      fmt.Println("offer candidates recieved")
 			messagesMu.Lock()
 			msg.OfferCandidates = msgN.OfferCandidates
 			messagesMu.Unlock()
 			msg.pingAnswer <- Candidates
 		} else {
-			sendMsg := Message{
-				AnswerSDP:        msg.AnswerSDP,
-				AnswerCandidates: msg.AnswerCandidates,
-			}
-			wg.Lock()
-			tErr := ws.WriteJSON(&sendMsg)
-			wg.Unlock()
-			if tErr != nil {
-				break
-			}
+			//sendMsg := Message{
+			//	AnswerSDP:        msg.AnswerSDP,
+			//	AnswerCandidates: msg.AnswerCandidates,
+			//}
+      fmt.Println("unknown answer recieved")
+			//wg.Lock()
+			//tErr := ws.WriteJSON(&sendMsg)
+			//wg.Unlock()
+			//if tErr != nil {
+			//	break
+			//}
 		}
 	}
 }
 
 func handlePingOffer(ws *websocket.Conn, msg *Message, wg *sync.Mutex) {
-
 	for {
 		pingOffer := <-msg.pingOffer
+    fmt.Println("offer is pinged. sending ", pingOffer)
 		if pingOffer == SDP {
 			tErr := ws.WriteJSON(Message{AnswerSDP: msg.AnswerSDP})
 			if tErr != nil {
@@ -178,6 +182,9 @@ func handlePingOffer(ws *websocket.Conn, msg *Message, wg *sync.Mutex) {
 			if tErr != nil {
 				break
 			}
-		}
+		} else if pingOffer == Close {
+      ws.Close()
+      break
+    }
 	}
 }
