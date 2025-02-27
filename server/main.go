@@ -22,8 +22,10 @@ var (
 )
 
 func main() {
-	http.HandleFunc("/offer", handleOffer)
-	http.HandleFunc("/connect", handleConnect)
+  mux := http.NewServeMux()
+	mux.HandleFunc("/offer", handleOffer)
+	mux.HandleFunc("/connect", handleConnect)
+  mux.HandleFunc("/", handleOffer)
 	
   port := os.Getenv("PORT")
 	if port == "" {
@@ -31,7 +33,7 @@ func main() {
 	}
 
 	fmt.Println("Server started on port", port)
-  if err := http.ListenAndServe(":"+port, nil); err != nil {
+  if err := http.ListenAndServe(":"+port, mux); err != nil {
 		fmt.Println("Could not start server: ", err)
 	}
 }

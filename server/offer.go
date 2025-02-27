@@ -32,7 +32,7 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 				ws.Close()
 				return
 			}
-			otp = fmt.Sprintf("%d", rand.Intn(100))
+			otp = fmt.Sprintf("%d", rand.Intn(100000))
 			messagesMu.Lock() // !! Lock
 			findOtp := getMessage(otp)
 			if findOtp == nil {

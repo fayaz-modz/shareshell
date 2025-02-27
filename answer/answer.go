@@ -6,10 +6,8 @@ import (
 	"sharec/auth"
 	"sharec/models"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/pion/randutil"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -24,7 +22,11 @@ var Msg = models.Message{
 
 var MsgMu sync.Mutex
 
-func AnswerConnection(otp string) {
+type DataChannel = webrtc.DataChannel
+type DataChannelMessage = webrtc.DataChannelMessage
+
+func AnswerConnection(wsURL string, otp string, onConnectionOpen func(dataChannel *DataChannel, peerConnection *webrtc.PeerConnection)) {
+	isConnectedMu := &sync.Mutex{}
 	isConnected := false
 	Msg.Otp = otp
 
@@ -50,7 +52,7 @@ func AnswerConnection(otp string) {
 	reqHeaders.Add("otp", otp)
 
 	var wsMu sync.Mutex
-	ws, res, err := websocket.DefaultDialer.Dial("ws://localhost:8080/connect", reqHeaders)
+	ws, res, err := websocket.DefaultDialer.Dial(wsURL, reqHeaders)
 	if res.StatusCode == http.StatusNotFound {
 		fmt.Println("Invalid OTP.")
 		return
@@ -79,9 +81,12 @@ func AnswerConnection(otp string) {
 			var msg models.Message
 			err := ws.ReadJSON(&msg)
 			if err != nil {
+				isConnectedMu.Lock()
 				if isConnected {
+					isConnectedMu.Unlock()
 					break
 				}
+				isConnectedMu.Unlock()
 				fmt.Println("could not read message:", err)
 				break
 			}
@@ -166,6 +171,12 @@ func AnswerConnection(otp string) {
 			AnswerCandidates: []string{candidate.ToJSON().Candidate},
 		})
 		if err != nil {
+      isConnectedMu.Lock()
+      if isConnected {
+        isConnectedMu.Unlock()
+        return
+      }
+      isConnectedMu.Unlock()
 			fmt.Println("error sending candidates:", err)
 			ws.Close()
 			return
@@ -177,8 +188,11 @@ func AnswerConnection(otp string) {
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		fmt.Printf("Peer Connection State has changed: %s\n", state.String())
 		if state == webrtc.PeerConnectionStateConnected {
+      isConnectedMu.Lock()
 			isConnected = true
+      isConnectedMu.Unlock()
 			wg.Add(1)
+			ws.Close()
 		} else if state == webrtc.PeerConnectionStateFailed {
 			fmt.Println("Peer Connection has gone to failed exiting")
 			wg.Done()
@@ -193,37 +207,7 @@ func AnswerConnection(otp string) {
 	})
 
 	peerConnection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
-		fmt.Printf("New DataChannel %s %d\n", dataChannel.Label(), dataChannel.ID())
-
-		// Register channel opening handling
-		dataChannel.OnOpen(func() {
-			fmt.Printf(
-				"Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every 5 seconds\n",
-				dataChannel.Label(), dataChannel.ID(),
-			)
-
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				message, sendTextErr := randutil.GenerateCryptoRandomString(
-					15, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-				)
-				if sendTextErr != nil {
-					panic(sendTextErr)
-				}
-
-				// Send the message as text
-				fmt.Printf("Sending '%s'\n", message)
-				if sendTextErr = dataChannel.SendText(message); sendTextErr != nil {
-					panic(sendTextErr)
-				}
-			}
-		})
-
-		// Register text message handling
-		dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-			fmt.Printf("Message from DataChannel '%s': '%s'\n", dataChannel.Label(), string(msg.Data))
-		})
+		onConnectionOpen(dataChannel, peerConnection)
 	})
 	wg.Wait()
 }

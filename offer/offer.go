@@ -29,9 +29,9 @@ const (
 )
 
 type DataChannelMessage = webrtc.DataChannelMessage
-type DataChennel = webrtc.DataChannel
+type DataChannel = webrtc.DataChannel
 
-func NewConn(onConnectionOpen func(dataChannel *DataChennel), onMessage func(msg DataChannelMessage)) {
+func NewConn(wsURL string, onConnectionOpen func(dataChannel *DataChannel, peerConnection *webrtc.PeerConnection)) {
 	forceClose := false
 	var MsgMu sync.Mutex
 
@@ -61,7 +61,7 @@ func NewConn(onConnectionOpen func(dataChannel *DataChennel), onMessage func(msg
 	}()
 
 	wsLock := &sync.Mutex{}
-	ws, _, err := websocket.DefaultDialer.Dial("ws://localhost:8080/offer", nil)
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		fmt.Println("could not contact server:", err)
 		return
@@ -205,20 +205,24 @@ func NewConn(onConnectionOpen func(dataChannel *DataChennel), onMessage func(msg
 		if state == webrtc.PeerConnectionStateFailed {
 			fmt.Println("Peer Connection has gone to failed exiting")
 			forceClose = true
-			ws.Close()
+      err := ws.Close()
+      if err != nil {
+        wg.Done()
+      }
 		}
 
 		if state == webrtc.PeerConnectionStateClosed {
 			fmt.Println("Peer Connection has gone to closed exiting")
 			forceClose = true
-			ws.Close()
+      if err := ws.Close(); err != nil {
+        wg.Done()
+      }
 		}
 	})
 
 	dataChannel.OnOpen(func() {
-		onConnectionOpen(dataChannel)
+		onConnectionOpen(dataChannel, peerConnection)
 	})
 
-	dataChannel.OnMessage(onMessage)
 	wg.Wait()
 }
