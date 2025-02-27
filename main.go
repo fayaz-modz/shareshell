@@ -32,12 +32,12 @@ func parse(command string) {
 		return
 	}
 	if command == "offer" {
-    var url string
-    if len(os.Args) > 2 {
-      url = os.Args[2]
-    } else {
-      url = "ws://localhost:8080/offer"
-    }
+		var url string
+		if len(os.Args) > 2 {
+			url = os.Args[2]
+		} else {
+			url = "ws://localhost:8080/offer"
+		}
 		cmd := exec.Command("bash")
 		ptmx, err := pty.Start(cmd)
 		if err != nil {
@@ -54,7 +54,8 @@ func parse(command string) {
 			resizeChan := make(chan os.Signal, 1)
 			signal.Notify(resizeChan, syscall.SIGWINCH)
 
-			var remoteWidth, remoteHeight uint16
+			var remoteAnswerWidth, remoteAnswerHeight uint16
+
 			go func() {
 				for range resizeChan {
 					localWidth, localHeight, err := term.GetSize(int(os.Stdin.Fd()))
@@ -66,12 +67,13 @@ func parse(command string) {
 					finalWidth := localWidth
 					finalHeight := localHeight
 
-					if remoteWidth > 0 && remoteHeight > 0 {
-						if int(remoteWidth) < localWidth {
-							finalWidth = int(remoteWidth)
+					// Compare with answer's size and take the smaller one
+					if remoteAnswerWidth > 0 && remoteAnswerHeight > 0 {
+						if int(remoteAnswerWidth) < localWidth {
+							finalWidth = int(remoteAnswerWidth)
 						}
-						if int(remoteHeight) < localHeight {
-							finalHeight = int(remoteHeight)
+						if int(remoteAnswerHeight) < localHeight {
+							finalHeight = int(remoteAnswerHeight)
 						}
 					}
 
@@ -84,7 +86,7 @@ func parse(command string) {
 					msg[0] = 0x01
 					binary.BigEndian.PutUint16(msg[1:3], uint16(finalHeight))
 					binary.BigEndian.PutUint16(msg[3:5], uint16(finalWidth))
-					dc.Send(msg)
+					dc.Send(msg) // Send the final decided size to answer
 				}
 			}()
 			resizeChan <- syscall.SIGWINCH
@@ -96,7 +98,7 @@ func parse(command string) {
 					n, err := ptmx.Read(buf)
 					if err != nil {
 						log.Print("PTY read error:", err)
-            peerConnection.Close()
+						peerConnection.Close()
 						return
 					}
 					dc.Send(buf[:n])
@@ -110,7 +112,7 @@ func parse(command string) {
 					n, err := os.Stdin.Read(buf)
 					if err != nil {
 						log.Print("Stdin read error:", err)
-            peerConnection.Close()
+						peerConnection.Close()
 						return
 					}
 					ptmx.Write(buf[:n])
@@ -119,9 +121,10 @@ func parse(command string) {
 
 			dc.OnMessage(func(data webrtc.DataChannelMessage) {
 				if len(data.Data) > 0 && data.Data[0] == 0x01 {
-					remoteHeight = binary.BigEndian.Uint16(data.Data[1:3])
-					remoteWidth = binary.BigEndian.Uint16(data.Data[3:5])
-					resizeChan <- syscall.SIGWINCH
+					// Resize from remote (answer) -  just store the answer's size
+					remoteAnswerHeight = binary.BigEndian.Uint16(data.Data[1:3])
+					remoteAnswerWidth = binary.BigEndian.Uint16(data.Data[3:5])
+					resizeChan <- syscall.SIGWINCH // Trigger resize logic with answer's size
 				} else {
 					ptmx.Write(data.Data)
 				}
@@ -136,30 +139,47 @@ func parse(command string) {
 			return
 		}
 		fmt.Println("connecting to otp:", os.Args[2])
-    var url string
-    if len(os.Args) > 3 {
-      url = os.Args[3]
-    } else {
-      url = "ws://localhost:8080/connect"
-    }
-    println("connecing to ", url)
+		var url string
+		if len(os.Args) > 3 {
+			url = os.Args[3]
+		} else {
+			url = "ws://localhost:8080/connect"
+		}
+		println("connecting to ", url)
+		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+		if err != nil {
+			log.Fatal("Failed to enter raw mode:", err)
+		}
+		defer term.Restore(int(os.Stdin.Fd()), oldState)
+
 		answer.AnswerConnection(url, os.Args[2], func(dc *webrtc.DataChannel, peerConnection *webrtc.PeerConnection) {
 			resizeChan := make(chan os.Signal, 1)
 			signal.Notify(resizeChan, syscall.SIGWINCH)
 
 			go func() {
-				oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-				if err != nil {
-					log.Fatal("Failed to enter raw mode:", err)
-				}
-				defer term.Restore(int(os.Stdin.Fd()), oldState)
+				go func() {
+					for range resizeChan {
+						localWidth, localHeight, err := term.GetSize(int(os.Stdin.Fd()))
+						if err != nil {
+							log.Print("Error getting local size:", err)
+							continue
+						}
+
+						msg := make([]byte, 5)
+						msg[0] = 0x01
+						binary.BigEndian.PutUint16(msg[1:3], uint16(localHeight))
+						binary.BigEndian.PutUint16(msg[3:5], uint16(localWidth))
+						dc.Send(msg) // Just send answer's size to offer
+					}
+				}()
+				resizeChan <- syscall.SIGWINCH // Initial size send
 
 				buf := make([]byte, 1024)
 				for {
 					n, err := os.Stdin.Read(buf)
 					if err != nil {
 						log.Print("Stdin read error:", err)
-            peerConnection.Close()
+						peerConnection.Close()
 						return
 					}
 					dc.Send(buf[:n])
@@ -168,7 +188,8 @@ func parse(command string) {
 
 			dc.OnMessage(func(data webrtc.DataChannelMessage) {
 				if len(data.Data) > 0 && data.Data[0] == 0x01 {
-					resizeChan <- syscall.SIGWINCH
+					// Resize from remote (offer) - Answer side just needs to know the size
+					// Answer side doesn't need to resize PTY. It just adapts to what offer sends.
 				} else {
 					os.Stdout.Write(data.Data)
 				}
@@ -186,3 +207,4 @@ func main() {
 	command := os.Args[1]
 	parse(command)
 }
+
