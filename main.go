@@ -36,7 +36,7 @@ func parse(command string) {
 		if len(os.Args) > 2 {
 			url = os.Args[2]
 		} else {
-			url = "ws://localhost:8080/offer"
+      url = "wss://shareshell.onrender.com/offer"
 		}
 		cmd := exec.Command("bash")
 		ptmx, err := pty.Start(cmd)
@@ -143,7 +143,7 @@ func parse(command string) {
 		if len(os.Args) > 3 {
 			url = os.Args[3]
 		} else {
-			url = "ws://localhost:8080/connect"
+      url = "wss://shareshell.onrender.com/offer"
 		}
 		println("connecting to ", url)
 		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
